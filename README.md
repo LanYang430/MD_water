@@ -124,14 +124,13 @@ The environment settings for running DMFF are configured in the `run_client_dmff
 
 Load modules of compilers, load `cuda`for running on GPU.
 
-    ```bash
+```bash
 module load gcc/8.3.0
 module load fftw/3.3.8/single-threads
 module load compiler/intel/ips2018/u1
 module load mkl/intel/ips2018/u1
 module load cuda/11.4
-    ```
-
+```
 Sett single-threaded execution
 
 ```bash
