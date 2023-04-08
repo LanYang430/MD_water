@@ -3,7 +3,7 @@
 ## Installation
 
 1. Install DMFF
-   Follow the instructions at [https://github.com/deepmodeling/DMFF/blob/master/docs/user_guide/installation.md](https://github.com/deepmodeling/DMFF/blob/master/docs/user_guide/installation.md) to complete the installation and testing. Once installed successfully, DMFF will be available in the `dmff` environment.
+   Follow the instructions at [DMFF](https://github.com/deepmodeling/DMFF/blob/master/docs/user_guide/installation.md) to complete the installation and testing. Once installed successfully, DMFF will be available in the `dmff` conda environment. Also, please note that this water test case was tested using the DMFF 0.2.0 version, which can be downloaded here: [DMFF 0.2.0](https://github.com/deepmodeling/DMFF/releases) 
 
 2. Install i-PI
    Activate the "dmff" environment using the following command:
@@ -12,11 +12,17 @@
    conda activate dmff
     ```
 
-   Then, refer to the "Quick Setup and Test" section at [https://github.com/i-pi/i-pi#readme](https://github.com/i-pi/i-pi#readme) for instructions on installing and testing i-PI.
+   Then, refer to the "Quick Setup and Test" section at [i-PI](https://github.com/i-pi/i-pi#readme) for instructions on installing and testing i-PI.
 
-## Initiate Simulations
+3. Install EANN
 
-​       We achieve MD simulation by interfaced hybrid force field with i-PI. The hybrid force field calculates energy and forces based on atomic coordinates, which are then passed to i-PI. i-PI updates the system structure based on positions and forces, and returns the new position information to the force field for further calculations. The parameters for molecular dynamics, such as time step, simulation time scale, temperature, and output, are specified in `input.xml`.
+   To install the software, please refer to the [EANN manumal_2020_7_29.pdf](https://github.com/Humourist/MD_water/blob/main/EANN manumal_2020_7_29.pdf) file located in the folder.
+
+## MD Inputs
+
+​       We run the MD simulation by interfacing the hybrid H2O force field with i-PI. i-PI uses a server-client system: the server is i-PI itself, which is a master process in charge of propagating dynamics. And the server gather information from client processes, which are typically energy and force calculators. The server updates the system structure, and returns the new position information to the force field calculation clients. The client listen to the server for atomic positions, then compute the forces and energy, and return it to the server. The server and the clients communicate with each other through UNIX sockets, which are a special type of file in the filesystem. 
+
+The parameters for molecular dynamics, such as time step, simulation time scale, temperature, and output options, are specified in `input.xml`, which is the input file for the server process.
 
 An example of `input.xml` is shown below, where the stride for output trajectory is defined:
 
@@ -28,7 +34,7 @@ An example of `input.xml` is shown below, where the stride for output trajectory
   </output>
 ```
 
-The input.xml file defines the forces type and their communication address. Since the hybrid force field consists of two parts, the EANN neural network and the physical model coded in DMFF.
+The input.xml file defines the forces type and their communication address (i.e., socket file names). Since the hybrid force field consists of two parts, the EANN neural network and the physical model coded in DMFF, we define two socket addresses, which the server will listen to and the client will write to. 
 
 ```xml
   <ffsocket name='dmff' mode='unix'>
@@ -73,7 +79,11 @@ The input.xml file defines the forces type and their communication address. Sinc
 
 `<timestep units='femtosecond'> 0.50 </timestep>` sets the simulation time step to 0.5 fs.
 
-## Run Simulations
+You may also see a more detailed description of `input.xml` in i-PI manual
+
+
+
+## Initiate Calculation
 
 To initiate the calculation, submit the 'sub.sh' script using the following command
 
@@ -81,14 +91,14 @@ To initiate the calculation, submit the 'sub.sh' script using the following comm
 sbatch sub.sh
 ```
 
-`sub.sh`will first run `run_server.sh` to start i-PI and read the information for MD from `input.xml`, initializing the entire MD simulation.
+`sub.sh`will first run `run_server.sh` to start an i-PI server, which reads the MD information from `input.xml`, initializing the entire MD simulation.
 
 ```bash
 # run server
 bash run_server.sh &
 ```
 
-Then, the forces for different components are calculated by calling DMFF calculator and EANN calculator using the client.
+Then, we initiate both the EANN and the DMFF force clients.
 
 ```bash
 # run client
@@ -102,9 +112,50 @@ while [ $iclient -le 8 ];do
 done
 ```
 
-In the case of PIMD with `nbeads=32`, both DMFF and EANN need to be calculated 32 times at each step. To improve simulation speed, parallel computing is usually employed by running multiple clients simultaneously for each factor of nbeads. Since each `client_dmff.py` computation requires a dedicated GPU, GPU allocation is done using `export CUDA_VISIBLE_DEVICES=$((iclient-1))` to specify that each DMFF Python code runs on a separate GPU.
+In the case of PIMD with `nbeads=32`, both DMFF and EANN need to be calculated 32 times at each step. To improve simulation speed, parallel computing is usually employed by running multiple clients simultaneously. In this example, we start 8 clients, so each client compute forces 4 times in each step. For the best performance, the number of clients should be a factor of `nbeads`.
+
+Each `client_dmff.py` computation requires a dedicated GPU. The GPU device number is specified using `export CUDA_VISIBLE_DEVICES=$((iclient-1))`, such that each client is submitted to a separate GPU.
 
 
+
+## Environment Settings
+
+The environment settings for running DMFF are configured in the `run_client_dmff.sh` file.
+
+Load modules of compilers, load `cuda`for running on GPU.
+
+    ```bash
+module load gcc/8.3.0
+module load fftw/3.3.8/single-threads
+module load compiler/intel/ips2018/u1
+module load mkl/intel/ips2018/u1
+module load cuda/11.4
+    ```
+
+Sett single-threaded execution
+
+```bash
+export OMP_NUM_THREADS=1
+```
+
+The environment settings for running EANN are configured in the `run_EANN.sh` file.
+
+Set 8 threads for concurrent execution of tasks, export `MODULEPATH` to your own path of module files. Load modules for compiling and EANN/2.0 for EANN training and testing.
+
+```bash
+export OMP_NUM_THREADS=8
+export OMP_STACKSIZE=2000000
+export MODULEPATH=$MODULEPATH:<your_module_path>
+module load Anaconda/anaconda3/2019.10
+module load compiler/intel/ips2018/u4
+module load mkl/intel/ips2018/u4
+module load EANN/2.0
+```
+
+
+
+
+## Settings in Force Calculation Clients
 
 The computation in `client_dmff.py` involves the following steps:
 
